@@ -19,8 +19,74 @@ import pandas as pd
 import numpy as np
 import json, os, time, threading
 from datetime import datetime, timedelta
+try:
+    import requests as req_lib
+except ImportError:
+    req_lib = None
 
 app = Flask(__name__)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DYNAMIC UNIVERSE FETCHING
+# ─────────────────────────────────────────────────────────────────────────────
+_universe_cache = None
+_universe_cache_time = None
+UNIVERSE_CACHE_HOURS = 24
+
+def fetch_sp500():
+    """Fetch S&P 500 tickers from Wikipedia."""
+    try:
+        tables = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")
+        df = tables[0]
+        return df["Symbol"].str.replace(".", "-", regex=False).tolist()
+    except Exception:
+        return []
+
+def fetch_nasdaq100():
+    """Fetch NASDAQ-100 tickers from Wikipedia."""
+    try:
+        tables = pd.read_html("https://en.wikipedia.org/wiki/Nasdaq-100")
+        for t in tables:
+            if "Ticker" in t.columns:
+                return t["Ticker"].tolist()
+            if "Symbol" in t.columns:
+                return t["Symbol"].tolist()
+        return []
+    except Exception:
+        return []
+
+def fetch_russell2000_sample():
+    """Return a curated Russell 2000 small/mid cap growth sample."""
+    return [
+        "SMCI","AXON","SAIA","AAON","TREX","NOVT","KTOS","HEI","MASI","IRTC",
+        "NVCR","PTCT","RARE","FOLD","KRYS","SWAV","ACAD","HRMY","ITCI","NBIX",
+        "SUPN","INCY","EXAS","NTRA","NEOG","OMCL","PRCT","IART","ALNY","IONS",
+        "MGLN","CRVL","PRFT","NSIT","SLAB","ICFI","FCN","KFRC","RLI","CINF",
+        "CELH","VITL","COKE","FIZZ","LANC","CHEF","SFM","WINA","CVCO","PATK",
+        "HLLY","DORM","DECK","SKX","POOL","AAON","GNRC","AEIS","AIMC","FWRD",
+        "GLOB","EXLS","WEX","PAYO","IIIV","PCTY","PAYC","EPAM","ONTO","ACLS",
+        "SMTC","OSIS","MPWR","MRVL","ZEUS","KALU","CMC","STLD","RS","NUE",
+        "HOLI","PSN","DRS","LDOS","SAIC","CACI","BAH","MANT","ICFI","FCN",
+        "HUBB","XYL","ETN","PH","ROK","GNRC","ITW","EMR","HON","GE",
+    ]
+
+def get_universe():
+    """Get combined universe with 24hr cache."""
+    global _universe_cache, _universe_cache_time
+    now = datetime.now()
+    if (_universe_cache is not None and _universe_cache_time is not None and
+            (now - _universe_cache_time).total_seconds() < UNIVERSE_CACHE_HOURS * 3600):
+        return _universe_cache
+
+    sp500    = fetch_sp500()
+    ndq100   = fetch_nasdaq100()
+    russell  = fetch_russell2000_sample()
+    combined = list(dict.fromkeys(sp500 + ndq100 + russell))  # deduplicate, preserve order
+    if len(combined) < 100:
+        combined = DEFAULT_UNIVERSE  # fallback
+    _universe_cache = combined
+    _universe_cache_time = now
+    return combined
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STOCK UNIVERSE
@@ -457,13 +523,20 @@ def index():
 
 @app.route("/api/universe")
 def api_universe():
-    return jsonify(DEFAULT_UNIVERSE)
+    return jsonify(get_universe())
+
+@app.route("/api/universe/count")
+def api_universe_count():
+    u = get_universe()
+    return jsonify({"count": len(u), "sources": ["S&P 500", "NASDAQ 100", "Russell 2000 精選"]})
 
 @app.route("/api/screen", methods=["POST"])
 def api_screen():
     """Screen a list of tickers. Returns results as JSON."""
     data    = request.json or {}
-    tickers = data.get("tickers", DEFAULT_UNIVERSE)
+    tickers = data.get("tickers", None)
+    if not tickers:
+        tickers = get_universe()
     tickers = [t.strip().upper() for t in tickers if t.strip()]
 
     results = []
@@ -484,7 +557,9 @@ def api_screen():
 def api_screen_stream():
     """SSE endpoint – streams one stock result at a time."""
     data    = request.json or {}
-    tickers = data.get("tickers", DEFAULT_UNIVERSE)
+    tickers = data.get("tickers", None)
+    if not tickers:
+        tickers = get_universe()
     tickers = [t.strip().upper() for t in tickers if t.strip()]
 
     def generate():
@@ -515,7 +590,9 @@ def api_stock(ticker):
 @app.route("/api/backtest", methods=["POST"])
 def api_backtest():
     data    = request.json or {}
-    tickers = data.get("tickers", DEFAULT_UNIVERSE)
+    tickers = data.get("tickers", None)
+    if not tickers:
+        tickers = get_universe()
     years   = int(data.get("years", 1))
     years   = max(1, min(years, 3))
     bt      = run_backtest(tickers, years)
