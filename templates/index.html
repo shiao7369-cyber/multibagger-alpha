@@ -1,0 +1,1280 @@
+<!DOCTYPE html>
+<html lang="zh-TW" class="dark">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Multibagger Alpha | 多倍股選股系統</title>
+
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    darkMode: 'class',
+    theme: {
+      extend: {
+        colors: {
+          dark:    { DEFAULT: '#0d1117', card: '#161b22', border: '#21262d', hover: '#1c2128' },
+          green:   { DEFAULT: '#3fb950', dim: '#2ea043', glow: '#56d364' },
+          red:     { DEFAULT: '#f85149', dim: '#da3633' },
+          yellow:  { DEFAULT: '#e3b341', dim: '#bb8009' },
+          blue:    { DEFAULT: '#388bfd', dim: '#1f6feb' },
+          muted:   '#8b949e',
+          label:   '#c9d1d9',
+        }
+      }
+    }
+  }
+</script>
+
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+<style>
+  * { box-sizing: border-box; }
+  body { background: #0d1117; color: #c9d1d9; font-family: 'Segoe UI', system-ui, sans-serif; }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: #161b22; }
+  ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
+
+  .card { background: #161b22; border: 1px solid #21262d; border-radius: 8px; }
+
+  /* Score bar gradient */
+  .score-bar-fill {
+    height: 6px; border-radius: 3px;
+    background: linear-gradient(90deg, #f85149 0%, #e3b341 40%, #3fb950 80%, #56d364 100%);
+    transition: width 0.6s ease;
+  }
+  .score-bar-track { background: #21262d; border-radius: 3px; height: 6px; }
+
+  /* Signal badges */
+  .badge-STRONG-BUY  { background:#1a3a1a; color:#56d364; border:1px solid #3fb950; }
+  .badge-BUY         { background:#1a2e1a; color:#3fb950; border:1px solid #2ea043; }
+  .badge-WATCH       { background:#2e2206; color:#e3b341; border:1px solid #bb8009; }
+  .badge-NEUTRAL     { background:#1c2128; color:#8b949e; border:1px solid #30363d; }
+  .badge-AVOID       { background:#2d1a1a; color:#f85149; border:1px solid #da3633; }
+
+  /* Table */
+  .data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .data-table th { background: #0d1117; color: #8b949e; text-transform: uppercase;
+                   font-size: 11px; letter-spacing:.05em; padding: 10px 12px;
+                   border-bottom: 1px solid #21262d; white-space: nowrap; cursor: pointer; }
+  .data-table th:hover { color: #c9d1d9; }
+  .data-table td { padding: 10px 12px; border-bottom: 1px solid #161b22; white-space: nowrap; }
+  .data-table tr:hover td { background: #1c2128; }
+  .data-table tr.selected td { background: #1f2d3d; }
+
+  /* Number colors */
+  .num-pos { color: #3fb950; }
+  .num-neg { color: #f85149; }
+  .num-neu { color: #8b949e; }
+
+  /* Tab nav */
+  .tab-btn { padding: 8px 18px; border-radius: 6px; font-size: 13px; font-weight: 500;
+             color: #8b949e; transition: all 0.15s; cursor: pointer; }
+  .tab-btn:hover  { color: #c9d1d9; background: #1c2128; }
+  .tab-btn.active { color: #c9d1d9; background: #21262d; }
+
+  /* Stat card */
+  .stat-card { background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 16px 20px; }
+
+  /* Progress */
+  .progress-bar { height: 4px; background: #21262d; border-radius: 2px; overflow: hidden; }
+  .progress-fill { height: 100%; background: #388bfd; transition: width 0.3s; border-radius: 2px; }
+
+  /* Flag badge */
+  .flag { display: inline-block; background: #2d1a1a; color: #f85149;
+          border: 1px solid #da3633; border-radius: 4px; font-size: 11px;
+          padding: 2px 6px; margin: 2px; }
+
+  /* Gauge ring */
+  .gauge-ring { position: relative; display: inline-flex; align-items: center;
+                justify-content: center; }
+
+  /* Input */
+  input, select, textarea {
+    background: #0d1117; border: 1px solid #30363d; color: #c9d1d9;
+    border-radius: 6px; padding: 7px 11px; font-size: 13px;
+    outline: none; transition: border-color 0.15s;
+  }
+  input:focus, select:focus, textarea:focus { border-color: #388bfd; }
+
+  /* Button */
+  .btn-primary { background: #238636; color: #fff; border: 1px solid #2ea043;
+                 border-radius: 6px; padding: 8px 18px; font-size: 13px; font-weight: 600;
+                 cursor: pointer; transition: background 0.15s; }
+  .btn-primary:hover { background: #2ea043; }
+  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-secondary { background: #21262d; color: #c9d1d9; border: 1px solid #30363d;
+                   border-radius: 6px; padding: 8px 18px; font-size: 13px; font-weight: 500;
+                   cursor: pointer; transition: background 0.15s; }
+  .btn-secondary:hover { background: #30363d; }
+
+  /* Tooltip */
+  [data-tip]:hover::after {
+    content: attr(data-tip);
+    position: absolute; background: #161b22; border: 1px solid #30363d;
+    color: #c9d1d9; font-size: 11px; padding: 4px 8px; border-radius: 4px;
+    white-space: nowrap; z-index: 999; margin-top: 24px; margin-left: -60px;
+  }
+  [data-tip] { position: relative; }
+
+  /* Loading spinner */
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spinner { width: 18px; height: 18px; border: 2px solid #30363d;
+             border-top-color: #388bfd; border-radius: 50%;
+             animation: spin 0.8s linear infinite; display: inline-block; }
+
+  /* Score color function */
+  .score-90 { color: #56d364; }
+  .score-75 { color: #3fb950; }
+  .score-60 { color: #e3b341; }
+  .score-45 { color: #f0883e; }
+  .score-low { color: #f85149; }
+
+  .sort-indicator { display: inline-block; margin-left: 4px; opacity: 0.4; }
+  .sort-asc .sort-indicator::after  { content: ' ▲'; opacity: 1; }
+  .sort-desc .sort-indicator::after { content: ' ▼'; opacity: 1; }
+</style>
+</head>
+
+<body class="min-h-screen">
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     TOP BAR
+══════════════════════════════════════════════════════════════════════════ -->
+<header class="border-b border-dark-border px-6 py-3 flex items-center justify-between"
+        style="background:#0d1117;">
+
+  <div class="flex items-center gap-3">
+    <div class="w-7 h-7 rounded-md flex items-center justify-center"
+         style="background:linear-gradient(135deg,#238636,#388bfd);">
+      <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 text-white" viewBox="0 0 20 20" fill="currentColor">
+        <path d="M2 11l3-3 3 3 5-5 3 3V17H2V11z"/>
+      </svg>
+    </div>
+    <span class="text-white font-bold text-base tracking-tight">Multibagger Alpha</span>
+    <span class="text-muted text-xs px-2 py-0.5 rounded border border-dark-border">
+      Based on Yartseva (2025)
+    </span>
+  </div>
+
+  <!-- Market Ticker Bar -->
+  <div class="flex items-center gap-6 text-xs" id="market-bar">
+    <span class="text-muted">S&P 500 <span id="sp-price" class="text-label">--</span></span>
+    <span class="text-muted">VIX <span id="vix-price" class="text-label">--</span></span>
+    <span class="text-muted">Fed Regime
+      <span id="fed-regime" class="font-semibold">--</span>
+    </span>
+    <span id="last-update" class="text-muted">--</span>
+  </div>
+
+  <div class="flex items-center gap-2">
+    <button onclick="clearCache()" class="btn-secondary text-xs py-1.5 px-3">
+      清除快取
+    </button>
+  </div>
+</header>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     TAB NAV
+══════════════════════════════════════════════════════════════════════════ -->
+<nav class="border-b border-dark-border px-6 flex gap-1 pt-2" style="background:#0d1117;">
+  <button class="tab-btn active" onclick="switchTab('screener', this)">
+    ⚡ 選股器
+  </button>
+  <button class="tab-btn" onclick="switchTab('backtest', this)">
+    📊 回測分析
+  </button>
+  <button class="tab-btn" onclick="switchTab('macro', this)">
+    🌍 總經環境
+  </button>
+  <button class="tab-btn" onclick="switchTab('criteria', this)">
+    📖 選股準則
+  </button>
+</nav>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     MAIN CONTENT
+══════════════════════════════════════════════════════════════════════════ -->
+<main class="p-6 max-w-full">
+
+<!-- ─────────────────────────────────────────────────────── TAB: SCREENER ── -->
+<div id="tab-screener">
+
+  <!-- Controls -->
+  <div class="card p-4 mb-4 flex flex-wrap gap-4 items-end">
+    <div class="flex-1 min-w-64">
+      <label class="block text-xs text-muted mb-1">股票代號（逗號分隔 或 留空=預設清單）</label>
+      <input id="custom-tickers" type="text" placeholder="e.g. AAPL, NVDA, TSLA"
+             class="w-full text-sm"/>
+    </div>
+    <div>
+      <label class="block text-xs text-muted mb-1">最低評分</label>
+      <select id="min-score" class="text-sm">
+        <option value="0">全部</option>
+        <option value="45">45+ (WATCH)</option>
+        <option value="62" selected>62+ (BUY)</option>
+        <option value="78">78+ (STRONG BUY)</option>
+      </select>
+    </div>
+    <div>
+      <label class="block text-xs text-muted mb-1">產業篩選</label>
+      <select id="sector-filter" class="text-sm">
+        <option value="">全部產業</option>
+        <option>Information Technology</option>
+        <option>Industrials</option>
+        <option>Consumer Discretionary</option>
+        <option>Health Care</option>
+        <option>Financials</option>
+        <option>Consumer Staples</option>
+        <option>Materials</option>
+        <option>Communication Services</option>
+        <option>Real Estate</option>
+        <option>Energy</option>
+      </select>
+    </div>
+    <div>
+      <label class="block text-xs text-muted mb-1">市值上限 (B)</label>
+      <select id="cap-filter" class="text-sm">
+        <option value="0">不限</option>
+        <option value="1" selected>< $1B (小型)</option>
+        <option value="5">< $5B (中型)</option>
+        <option value="15">< $15B</option>
+      </select>
+    </div>
+    <button id="btn-scan" class="btn-primary" onclick="startScan()">
+      🔍 開始掃描
+    </button>
+  </div>
+
+  <!-- Progress -->
+  <div id="scan-progress" class="hidden card p-3 mb-4">
+    <div class="flex items-center justify-between mb-2">
+      <div class="flex items-center gap-2">
+        <div class="spinner"></div>
+        <span class="text-sm text-label" id="scan-status">掃描中...</span>
+      </div>
+      <span class="text-xs text-muted" id="scan-count">0 / 0</span>
+    </div>
+    <div class="progress-bar">
+      <div class="progress-fill" id="scan-bar" style="width:0%"></div>
+    </div>
+  </div>
+
+  <!-- Summary Stats -->
+  <div id="summary-stats" class="hidden grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
+    <div class="stat-card">
+      <div class="text-xs text-muted mb-1">掃描股票數</div>
+      <div class="text-2xl font-bold text-label" id="stat-total">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="text-xs text-muted mb-1">強力買入</div>
+      <div class="text-2xl font-bold" style="color:#56d364" id="stat-strong">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="text-xs text-muted mb-1">買入</div>
+      <div class="text-2xl font-bold" style="color:#3fb950" id="stat-buy">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="text-xs text-muted mb-1">觀察</div>
+      <div class="text-2xl font-bold" style="color:#e3b341" id="stat-watch">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="text-xs text-muted mb-1">平均評分</div>
+      <div class="text-2xl font-bold text-blue" id="stat-avg">--</div>
+    </div>
+  </div>
+
+  <!-- Results Table -->
+  <div class="card overflow-x-auto" id="results-container">
+    <div class="p-12 text-center text-muted" id="empty-state">
+      點擊「開始掃描」載入美股多倍股候選
+    </div>
+    <table class="data-table hidden" id="results-table">
+      <thead>
+        <tr>
+          <th onclick="sortTable('rank')">#<span class="sort-indicator"></span></th>
+          <th onclick="sortTable('ticker')">代號<span class="sort-indicator"></span></th>
+          <th onclick="sortTable('name')">公司</th>
+          <th onclick="sortTable('score')">評分<span class="sort-indicator"></span></th>
+          <th onclick="sortTable('signal')">訊號</th>
+          <th onclick="sortTable('price')">股價<span class="sort-indicator"></span></th>
+          <th onclick="sortTable('market_cap')">市值<span class="sort-indicator"></span></th>
+          <th onclick="sortTable('fcf_p')" data-tip="Free Cash Flow / Market Cap (最重要指標)">
+            FCF/P<span class="sort-indicator"></span>
+          </th>
+          <th onclick="sortTable('bm')" data-tip="Book Value / Price (>0.4為佳)">
+            B/M<span class="sort-indicator"></span>
+          </th>
+          <th onclick="sortTable('ebitda_margin')" data-tip="EBITDA / Revenue">
+            EBITDA%<span class="sort-indicator"></span>
+          </th>
+          <th onclick="sortTable('roa')" data-tip="Return on Assets">
+            ROA<span class="sort-indicator"></span>
+          </th>
+          <th onclick="sortTable('price_pos')" data-tip="價格在52週區間的位置 (低=更好的進場點)">
+            52週位置<span class="sort-indicator"></span>
+          </th>
+          <th>紅旗警示</th>
+          <th>產業</th>
+        </tr>
+      </thead>
+      <tbody id="results-body"></tbody>
+    </table>
+  </div>
+</div><!-- /tab-screener -->
+
+
+<!-- ─────────────────────────────────────────────────────── TAB: BACKTEST ── -->
+<div id="tab-backtest" class="hidden">
+
+  <div class="card p-4 mb-4 flex flex-wrap gap-4 items-end">
+    <div>
+      <label class="block text-xs text-muted mb-1">回測期間</label>
+      <select id="bt-years" class="text-sm">
+        <option value="1" selected>過去 1 年</option>
+        <option value="2">過去 2 年</option>
+        <option value="3">過去 3 年</option>
+      </select>
+    </div>
+    <div class="text-xs text-muted self-end pb-2 max-w-xs">
+      使用已掃描的評分排名前 20 檔股票，比較其歷史價格表現與 S&P 500
+    </div>
+    <button id="btn-backtest" class="btn-primary" onclick="runBacktest()">
+      ▶ 執行回測
+    </button>
+  </div>
+
+  <!-- Stats -->
+  <div id="bt-stats" class="hidden grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
+    <div class="stat-card">
+      <div class="text-xs text-muted mb-1">組合報酬</div>
+      <div class="text-2xl font-bold" id="bt-port-ret">--</div>
+    </div>
+    <div class="stat-card">
+      <div class="text-xs text-muted mb-1">S&P 500 報酬</div>
+      <div class="text-2xl font-bold" id="bt-spy-ret">--</div>
+    </div>
+    <div class="stat-card">
+      <div class="text-xs text-muted mb-1">Alpha 超額報酬</div>
+      <div class="text-2xl font-bold" id="bt-alpha">--</div>
+    </div>
+    <div class="stat-card">
+      <div class="text-xs text-muted mb-1">勝率</div>
+      <div class="text-2xl font-bold" id="bt-winrate">--</div>
+    </div>
+    <div class="stat-card">
+      <div class="text-xs text-muted mb-1">Sharpe Ratio</div>
+      <div class="text-2xl font-bold" id="bt-sharpe">--</div>
+    </div>
+  </div>
+
+  <!-- Chart -->
+  <div class="card p-4 mb-4 hidden" id="bt-chart-card">
+    <div class="text-sm font-semibold text-label mb-3">
+      多倍股組合 vs. S&P 500 (累計報酬 %)
+    </div>
+    <canvas id="bt-chart" height="280"></canvas>
+  </div>
+
+  <!-- Stock Detail Table -->
+  <div class="card overflow-x-auto hidden" id="bt-table-card">
+    <div class="p-4 text-sm font-semibold text-label border-b border-dark-border">
+      個股回測績效（評分前 20 名）
+    </div>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>代號</th>
+          <th>個股報酬</th>
+          <th>SPY 報酬</th>
+          <th>Alpha</th>
+          <th>勝負</th>
+          <th>多倍股評分</th>
+        </tr>
+      </thead>
+      <tbody id="bt-body"></tbody>
+    </table>
+  </div>
+</div><!-- /tab-backtest -->
+
+
+<!-- ────────────────────────────────────────────────────────── TAB: MACRO ── -->
+<div id="tab-macro" class="hidden">
+
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+    <!-- Fed Rate Card -->
+    <div class="card p-5">
+      <div class="text-sm font-semibold text-label mb-4">🏦 聯準會利率環境</div>
+      <div id="macro-fed" class="text-muted text-sm">載入中...</div>
+    </div>
+    <!-- Market Status -->
+    <div class="card p-5">
+      <div class="text-sm font-semibold text-label mb-4">📈 市場現況</div>
+      <div id="macro-market" class="text-muted text-sm">載入中...</div>
+    </div>
+  </div>
+
+  <!-- Academic Finding -->
+  <div class="card p-5">
+    <div class="text-sm font-semibold text-label mb-3">📚 論文核心發現：利率對多倍股的影響</div>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+      <div class="p-3 rounded border border-dark-border">
+        <div class="font-semibold mb-1" style="color:#f85149">利率上升環境</div>
+        <div class="text-muted mb-2">Fed 升息週期中</div>
+        <div class="text-2xl font-bold" style="color:#f85149">-10.1%</div>
+        <div class="text-xs text-muted mt-1">次年多倍股組合平均超額報酬衝擊</div>
+        <div class="mt-2 text-xs text-muted">原因：折現率上升壓低成長股估值</div>
+      </div>
+      <div class="p-3 rounded border border-dark-border">
+        <div class="font-semibold mb-1" style="color:#e3b341">利率穩定環境</div>
+        <div class="text-muted mb-2">Fed 暫停升息</div>
+        <div class="text-2xl font-bold" style="color:#e3b341">+0%</div>
+        <div class="text-xs text-muted mt-1">基準情境</div>
+        <div class="mt-2 text-xs text-muted">個股基本面重要性上升</div>
+      </div>
+      <div class="p-3 rounded border border-dark-border">
+        <div class="font-semibold mb-1" style="color:#3fb950">利率下降環境</div>
+        <div class="text-muted mb-2">Fed 降息週期中</div>
+        <div class="text-2xl font-bold" style="color:#3fb950">超額正報酬</div>
+        <div class="text-xs text-muted mt-1">成長股折現率降低</div>
+        <div class="mt-2 text-xs text-muted">高估值成長股獲最大提振</div>
+      </div>
+    </div>
+    <div class="mt-4 text-xs text-muted p-3 rounded" style="background:#161b22; border:1px solid #21262d;">
+      ⚠️ 論文指出：即使在升息環境下，謹慎選股仍可創造 Alpha。利率環境影響整體組合，
+      但個股的 FCF/P、B/M、規模等特性仍是最重要的超額報酬來源。
+    </div>
+  </div>
+</div><!-- /tab-macro -->
+
+
+<!-- ──────────────────────────────────────────────────────── TAB: CRITERIA ── -->
+<div id="tab-criteria" class="hidden">
+
+  <div class="card p-5 mb-4">
+    <div class="text-sm font-semibold text-label mb-1">關於本選股系統</div>
+    <div class="text-xs text-muted">
+      本系統依據 Anna Yartseva（2025）
+      「The Alchemy of Multibagger Stocks」(CAFE Working Paper #33) 的實證研究建構。
+      該研究分析了 2009-2024 年間 464 支在美國交易所（NYSE/NASDAQ）實現 10 倍以上漲幅的股票，
+      使用動態面板迴歸（GMM估計）找出具統計顯著性的預測因子。
+    </div>
+  </div>
+
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+    <div class="card p-5">
+      <div class="text-sm font-semibold mb-4" style="color:#388bfd">7 大評分因子（共 100 分）</div>
+      <div class="space-y-4 text-sm">
+
+        <div class="border-b border-dark-border pb-3">
+          <div class="flex justify-between items-center mb-1">
+            <span class="font-semibold text-label">1. FCF/P 自由現金流殖利率</span>
+            <span class="text-yellow font-bold">25 分</span>
+          </div>
+          <div class="text-xs text-muted">Free Cash Flow / Market Cap</div>
+          <div class="text-xs mt-1">
+            論文最重要發現：每 1% FCF/P 提升，未來股價報酬增加 7-52%。
+            代表公司創造真實現金流的能力。建議 >8% 為佳。
+          </div>
+        </div>
+
+        <div class="border-b border-dark-border pb-3">
+          <div class="flex justify-between items-center mb-1">
+            <span class="font-semibold text-label">2. B/M 帳面市值比</span>
+            <span class="text-yellow font-bold">20 分</span>
+          </div>
+          <div class="text-xs text-muted">Book Value / Price（股東權益/市值）</div>
+          <div class="text-xs mt-1">
+            論文發現高 B/M（被低估）股票表現最佳，線性關係顯著。
+            B/M > 0.4 且正 EBITDA 時，勝率大幅提升。B/M=1.0 代表市值等於帳面價值。
+          </div>
+        </div>
+
+        <div class="border-b border-dark-border pb-3">
+          <div class="flex justify-between items-center mb-1">
+            <span class="font-semibold text-label">3. 市值規模（小型股偏好）</span>
+            <span class="text-yellow font-bold">15 分</span>
+          </div>
+          <div class="text-xs text-muted">Total Enterprise Value / Market Cap</div>
+          <div class="text-xs mt-1">
+            研究樣本中位數市值為 $3.48 億。小型股年均超額報酬 37.7%，大型股僅 9.7%。
+            未來成長空間更大，機構法人覆蓋少。
+          </div>
+        </div>
+
+        <div class="border-b border-dark-border pb-3">
+          <div class="flex justify-between items-center mb-1">
+            <span class="font-semibold text-label">4. EBITDA 利潤率</span>
+            <span class="text-yellow font-bold">12 分</span>
+          </div>
+          <div class="text-xs text-muted">EBITDA / Revenue</div>
+          <div class="text-xs mt-1">
+            靜態模型中偏好 EBITDA 利潤率（vs. 淨利率、ROE）。
+            虧損（負 EBITDA）公司表現最差，平均超額報酬 -9.6%。
+          </div>
+        </div>
+
+        <div class="border-b border-dark-border pb-3">
+          <div class="flex justify-between items-center mb-1">
+            <span class="font-semibold text-label">5. ROA 資產報酬率</span>
+            <span class="text-yellow font-bold">10 分</span>
+          </div>
+          <div class="text-xs text-muted">Net Income / Total Assets</div>
+          <div class="text-xs mt-1">
+            動態 GMM 模型中最顯著的獲利指標（優於 ROE、ROC）。
+            係數 0.4-1.9，顯示對未來報酬有顯著預測力。
+          </div>
+        </div>
+
+        <div class="border-b border-dark-border pb-3">
+          <div class="flex justify-between items-center mb-1">
+            <span class="font-semibold text-label">6. 投資效率（Inv Dummy）</span>
+            <span class="text-yellow font-bold">10 分</span>
+          </div>
+          <div class="text-xs text-muted">資產成長率 vs. EBITDA 成長率</div>
+          <div class="text-xs mt-1">
+            論文獨特發現：多倍股需要積極投資（資產成長）但必須有 EBITDA 支撐。
+            資產成長 > EBITDA 成長時，次年報酬減少 4-11 個百分點。
+          </div>
+        </div>
+
+        <div>
+          <div class="flex justify-between items-center mb-1">
+            <span class="font-semibold text-label">7. 52 週價格位置</span>
+            <span class="text-yellow font-bold">8 分</span>
+          </div>
+          <div class="text-xs text-muted">(現價 - 52週低點) / (52週高點 - 52週低點)</div>
+          <div class="text-xs mt-1">
+            動量反轉效應：靠近52週高點的股票次年報酬較低。
+            最佳進場：過去6個月顯著下跌，且接近52週低點。
+            符合論文的過度反應假說（Overreaction Hypothesis）。
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="space-y-4">
+      <!-- Red Flags -->
+      <div class="card p-5">
+        <div class="text-sm font-semibold mb-3" style="color:#f85149">🚩 紅旗警示（自動扣分）</div>
+        <div class="space-y-2 text-sm">
+          <div class="flex gap-2 items-start">
+            <span class="flag">FCF 為負</span>
+            <span class="text-xs text-muted">公司燒錢，無法自力成長</span>
+          </div>
+          <div class="flex gap-2 items-start">
+            <span class="flag">負股東權益</span>
+            <span class="text-xs text-muted">B/M < 0，負債超過資產，適合做空</span>
+          </div>
+          <div class="flex gap-2 items-start">
+            <span class="flag">EBITDA 為負</span>
+            <span class="text-xs text-muted">核心業務虧損，最差表現來源</span>
+          </div>
+          <div class="flex gap-2 items-start">
+            <span class="flag">ROA 為負</span>
+            <span class="text-xs text-muted">資產未能有效創造利潤</span>
+          </div>
+          <div class="flex gap-2 items-start">
+            <span class="flag">資產持續收縮</span>
+            <span class="text-xs text-muted">不投資=無法成長，最差投資訊號</span>
+          </div>
+          <div class="flex gap-2 items-start">
+            <span class="flag">靠近52週高點</span>
+            <span class="text-xs text-muted">動量反轉效應，次年報酬偏低</span>
+          </div>
+          <div class="flex gap-2 items-start">
+            <span class="flag">資本支出超越EBITDA成長</span>
+            <span class="text-xs text-muted">投資不具備盈利支撐，燒錢型成長</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sample Characteristics -->
+      <div class="card p-5">
+        <div class="text-sm font-semibold mb-3" style="color:#3fb950">📊 論文多倍股樣本特徵（2009 起始點）</div>
+        <div class="grid grid-cols-2 gap-3 text-sm">
+          <div>
+            <div class="text-xs text-muted">中位數市值</div>
+            <div class="font-semibold text-label">$3.48 億</div>
+          </div>
+          <div>
+            <div class="text-xs text-muted">15年平均漲幅</div>
+            <div class="font-semibold text-label">26 倍 (21.4% CAGR)</div>
+          </div>
+          <div>
+            <div class="text-xs text-muted">中位數 P/S</div>
+            <div class="font-semibold text-label">0.6x</div>
+          </div>
+          <div>
+            <div class="text-xs text-muted">中位數 Forward P/E</div>
+            <div class="font-semibold text-label">11.3x</div>
+          </div>
+          <div>
+            <div class="text-xs text-muted">中位數 PEG</div>
+            <div class="font-semibold text-label">0.8</div>
+          </div>
+          <div>
+            <div class="text-xs text-muted">毛利率</div>
+            <div class="font-semibold text-label">34.8%</div>
+          </div>
+          <div>
+            <div class="text-xs text-muted">ROE</div>
+            <div class="font-semibold text-label">9.0%</div>
+          </div>
+          <div>
+            <div class="text-xs text-muted">EPS CAGR</div>
+            <div class="font-semibold text-label">20.0%</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Disclaimer -->
+      <div class="card p-4">
+        <div class="text-xs text-muted">
+          ⚠️ <strong>免責聲明：</strong>本工具僅供研究與教育用途，不構成投資建議。
+          所有評分均基於公開財務數據的量化分析。過去績效不代表未來結果。
+          投資有風險，請自行評估。數據來源：Yahoo Finance（yfinance）。
+          論文發現：多倍股平均持有期 107 個月（約9年），耐心持有至關重要。
+        </div>
+      </div>
+    </div>
+  </div>
+</div><!-- /tab-criteria -->
+
+</main>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     STOCK DETAIL MODAL
+══════════════════════════════════════════════════════════════════════════ -->
+<div id="modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4"
+     style="background:rgba(0,0,0,0.7);" onclick="closeModal(event)">
+  <div class="card w-full max-w-2xl max-h-screen overflow-y-auto"
+       onclick="event.stopPropagation()">
+    <div class="flex items-center justify-between p-4 border-b border-dark-border">
+      <div>
+        <span class="text-lg font-bold text-label" id="modal-ticker"></span>
+        <span class="text-sm text-muted ml-2" id="modal-name"></span>
+      </div>
+      <button onclick="document.getElementById('modal').classList.add('hidden')"
+              class="text-muted hover:text-label text-xl">✕</button>
+    </div>
+    <div class="p-4" id="modal-body"></div>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     JAVASCRIPT
+══════════════════════════════════════════════════════════════════════════ -->
+<script>
+// ─── State ────────────────────────────────────────────────────────────────
+let allResults = [];
+let sortCol = 'score', sortDir = 'desc';
+let btChart = null;
+
+// ─── Tab Switching ─────────────────────────────────────────────────────────
+function switchTab(tab, btn) {
+  ['screener','backtest','macro','criteria'].forEach(t => {
+    document.getElementById('tab-' + t).classList.add('hidden');
+  });
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + tab).classList.remove('hidden');
+  if (btn) btn.classList.add('active');
+  if (tab === 'macro') loadMacro();
+}
+
+// ─── Market Bar ────────────────────────────────────────────────────────────
+async function loadMacro() {
+  try {
+    const r = await fetch('/api/macro');
+    const d = await r.json();
+    if (d.sp500) {
+      document.getElementById('sp-price').textContent = d.sp500.toLocaleString();
+    }
+    if (d.vix) {
+      const el = document.getElementById('vix-price');
+      el.textContent = d.vix;
+      el.className = d.vix > 25 ? 'text-red font-semibold' :
+                     d.vix > 18 ? 'text-yellow font-semibold' : 'text-green font-semibold';
+    }
+    if (d.fed_regime) {
+      const fr = d.fed_regime;
+      const el = document.getElementById('fed-regime');
+      const colors = { rising: '#f85149', stable: '#e3b341', falling: '#3fb950' };
+      const labels = { rising: '↑ 升息', stable: '— 穩定', falling: '↓ 降息' };
+      el.textContent = labels[fr.trend] || fr.trend;
+      el.style.color = colors[fr.trend] || '#c9d1d9';
+    }
+    document.getElementById('last-update').textContent =
+      '更新：' + new Date(d.timestamp).toLocaleTimeString('zh-TW');
+
+    // Macro tab content
+    renderMacroTab(d);
+  } catch(e) {
+    console.error('macro error', e);
+  }
+}
+
+function renderMacroTab(d) {
+  const fr = d.fed_regime;
+  if (fr) {
+    const trendLabel = { rising:'升息', stable:'穩定', falling:'降息' };
+    const trendColor = { rising:'#f85149', stable:'#e3b341', falling:'#3fb950' };
+    document.getElementById('macro-fed').innerHTML = `
+      <div class="grid grid-cols-3 gap-4 mb-4">
+        <div>
+          <div class="text-xs text-muted mb-1">目前利率</div>
+          <div class="text-3xl font-bold text-label">${fr.current_rate}%</div>
+        </div>
+        <div>
+          <div class="text-xs text-muted mb-1">3個月前</div>
+          <div class="text-3xl font-bold text-label">${fr.rate_3m_ago}%</div>
+        </div>
+        <div>
+          <div class="text-xs text-muted mb-1">利率趨勢</div>
+          <div class="text-3xl font-bold" style="color:${trendColor[fr.trend]}">${trendLabel[fr.trend]}</div>
+        </div>
+      </div>
+      <div class="p-3 rounded text-sm" style="background:#161b22; border:1px solid #21262d;">
+        ${fr.trend === 'rising'
+          ? `⚠️ <strong style="color:#f85149">升息環境</strong>：依論文，升息時多倍股次年超額報酬平均減少 <strong>10.1%</strong>。建議謹慎選股，提高 FCF/P 與 B/M 門檻。`
+          : fr.trend === 'falling'
+          ? `✅ <strong style="color:#3fb950">降息環境</strong>：有利於高成長股。折現率降低提升未來現金流估值，積極尋找多倍股候選。`
+          : `📊 <strong style="color:#e3b341">利率穩定</strong>：基本面選股為王，個股 FCF/P、B/M 等特性主導超額報酬。`}
+      </div>`;
+  }
+  document.getElementById('macro-market').innerHTML = `
+    <div class="grid grid-cols-2 gap-4">
+      <div>
+        <div class="text-xs text-muted mb-1">S&P 500</div>
+        <div class="text-2xl font-bold text-label">${d.sp500 ? d.sp500.toLocaleString() : '--'}</div>
+      </div>
+      <div>
+        <div class="text-xs text-muted mb-1">VIX 恐慌指數</div>
+        <div class="text-2xl font-bold" style="color:${d.vix > 25 ? '#f85149' : d.vix > 18 ? '#e3b341' : '#3fb950'}">${d.vix || '--'}</div>
+      </div>
+    </div>
+    <div class="mt-3 text-xs text-muted">
+      ${d.vix > 25 ? '⚠️ VIX > 25：市場恐慌，但論文指出多倍股往往在市場低迷時起漲，可視為尋找進場點的機會。' :
+        d.vix < 15 ? '😌 VIX < 15：市場平靜，估值偏高時期，需更嚴格篩選 B/M 和 FCF/P。' :
+        '📊 VIX 正常範圍，市場波動適中。'}
+    </div>`;
+}
+
+// ─── Screener ─────────────────────────────────────────────────────────────
+async function startScan() {
+  const customInput = document.getElementById('custom-tickers').value.trim();
+  let tickers = [];
+  if (customInput) {
+    tickers = customInput.split(/[,\s]+/).map(t => t.trim().toUpperCase()).filter(Boolean);
+  }
+
+  document.getElementById('btn-scan').disabled = true;
+  document.getElementById('scan-progress').classList.remove('hidden');
+  document.getElementById('empty-state').classList.add('hidden');
+  document.getElementById('results-table').classList.add('hidden');
+  document.getElementById('summary-stats').classList.add('hidden');
+  allResults = [];
+
+  const payload = { tickers: tickers.length ? tickers : [] };
+
+  try {
+    const resp = await fetch('/api/screen/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n\n');
+      buffer = lines.pop();
+
+      for (const line of lines) {
+        if (!line.startsWith('data:')) continue;
+        const json = line.slice(5).trim();
+        try {
+          const msg = JSON.parse(json);
+          if (msg.done) {
+            finalizeScan();
+          } else {
+            updateProgress(msg.index, msg.total, msg.ticker);
+            if (msg.result) allResults.push(msg.result);
+          }
+        } catch {}
+      }
+    }
+    finalizeScan();
+  } catch (e) {
+    // Fallback to regular POST
+    try {
+      const r = await fetch('/api/screen', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await r.json();
+      allResults = data.results || [];
+      finalizeScan();
+    } catch (e2) {
+      console.error(e2);
+      document.getElementById('scan-progress').classList.add('hidden');
+    }
+  }
+
+  document.getElementById('btn-scan').disabled = false;
+}
+
+function updateProgress(index, total, ticker) {
+  const pct = total > 0 ? Math.round((index + 1) / total * 100) : 0;
+  document.getElementById('scan-bar').style.width = pct + '%';
+  document.getElementById('scan-count').textContent = `${index + 1} / ${total}`;
+  document.getElementById('scan-status').textContent = `掃描中：${ticker}`;
+}
+
+function finalizeScan() {
+  document.getElementById('scan-progress').classList.add('hidden');
+  renderTable();
+  updateSummaryStats();
+  loadMacro();
+}
+
+function updateSummaryStats() {
+  const visible = getFilteredResults();
+  document.getElementById('summary-stats').classList.remove('hidden');
+  document.getElementById('stat-total').textContent = visible.length;
+  document.getElementById('stat-strong').textContent =
+    visible.filter(r => r.signal === 'STRONG BUY').length;
+  document.getElementById('stat-buy').textContent =
+    visible.filter(r => r.signal === 'BUY').length;
+  document.getElementById('stat-watch').textContent =
+    visible.filter(r => r.signal === 'WATCH').length;
+  const avg = visible.length ? visible.reduce((s, r) => s + r.score, 0) / visible.length : 0;
+  document.getElementById('stat-avg').textContent = avg.toFixed(1);
+}
+
+function getFilteredResults() {
+  const minScore  = parseInt(document.getElementById('min-score').value) || 0;
+  const sector    = document.getElementById('sector-filter').value;
+  const capLimit  = parseFloat(document.getElementById('cap-filter').value) || 0;
+
+  return allResults.filter(r => {
+    if (r.score < minScore) return false;
+    if (sector && r.sector !== sector) return false;
+    if (capLimit > 0 && r.market_cap && r.market_cap > capLimit * 1e9) return false;
+    return true;
+  });
+}
+
+function renderTable() {
+  const data = getFilteredResults();
+  data.sort((a, b) => {
+    let av = getSortVal(a, sortCol);
+    let bv = getSortVal(b, sortCol);
+    if (av === null || av === undefined) av = -Infinity;
+    if (bv === null || bv === undefined) bv = -Infinity;
+    return sortDir === 'desc' ? bv - av : av - bv;
+  });
+
+  const tbody = document.getElementById('results-body');
+  tbody.innerHTML = '';
+
+  data.forEach((r, i) => {
+    const bd = r.breakdown || {};
+    const fcfp   = bd.fcf_p?.value;
+    const bm     = bd.bm?.value;
+    const ebitda = bd.ebitda_margin?.value;
+    const roa    = r.details?.roa ?? (bd.roa?.value);
+    const pos    = bd.price_pos?.value;
+
+    const scoreColor =
+      r.score >= 78 ? '#56d364' :
+      r.score >= 62 ? '#3fb950' :
+      r.score >= 46 ? '#e3b341' :
+      r.score >= 30 ? '#8b949e' : '#f85149';
+
+    const flags = (r.red_flags || [])
+      .map(f => `<span class="flag">${f}</span>`).join('');
+
+    const tr = document.createElement('tr');
+    tr.style.cursor = 'pointer';
+    tr.onclick = () => showDetail(r.ticker);
+    tr.innerHTML = `
+      <td class="text-muted text-center">${i + 1}</td>
+      <td class="font-bold text-label">${r.ticker}</td>
+      <td class="text-muted max-w-xs truncate" style="max-width:160px"
+          title="${r.name || ''}">${r.name || '--'}</td>
+      <td>
+        <div class="flex items-center gap-2">
+          <span class="font-bold w-8 text-right" style="color:${scoreColor}">${r.score}</span>
+          <div class="score-bar-track w-20">
+            <div class="score-bar-fill" style="width:${r.score}%"></div>
+          </div>
+        </div>
+      </td>
+      <td>
+        <span class="px-2 py-0.5 rounded text-xs font-semibold badge-${r.signal.replace(' ','-')}">${r.signal}</span>
+      </td>
+      <td class="text-right text-label">
+        ${r.price ? '$' + r.price.toFixed(2) : '--'}
+      </td>
+      <td class="text-right text-muted">
+        ${r.market_cap ? fmtCap(r.market_cap) : '--'}
+      </td>
+      <td class="text-right ${fmtColor(fcfp)}">
+        ${fcfp !== null && fcfp !== undefined ? (fcfp * 100).toFixed(1) + '%' : '--'}
+      </td>
+      <td class="text-right ${fmtColor(bm)}">
+        ${bm !== null && bm !== undefined ? bm.toFixed(2) : '--'}
+      </td>
+      <td class="text-right ${fmtColor(ebitda)}">
+        ${ebitda !== null && ebitda !== undefined ? (ebitda * 100).toFixed(1) + '%' : '--'}
+      </td>
+      <td class="text-right ${fmtColor(roa)}">
+        ${roa !== null && roa !== undefined ? (roa * 100).toFixed(1) + '%' : '--'}
+      </td>
+      <td class="text-right">
+        ${pos !== null && pos !== undefined
+          ? `<span class="${pos < 35 ? 'num-pos' : pos > 70 ? 'num-neg' : 'num-neu'}">${pos.toFixed(0)}%</span>`
+          : '--'}
+      </td>
+      <td>${flags || '<span class="text-green text-xs">✓ 無</span>'}</td>
+      <td class="text-muted text-xs">${r.sector || '--'}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  document.getElementById('results-table').classList.remove('hidden');
+  if (data.length === 0) {
+    document.getElementById('empty-state').classList.remove('hidden');
+    document.getElementById('empty-state').textContent = '無符合條件的股票';
+  }
+}
+
+function getSortVal(r, col) {
+  const bd = r.breakdown || {};
+  switch(col) {
+    case 'rank':        return r.score;
+    case 'ticker':      return r.ticker;
+    case 'name':        return r.name || '';
+    case 'score':       return r.score;
+    case 'signal':      return ['STRONG BUY','BUY','WATCH','NEUTRAL','AVOID'].indexOf(r.signal);
+    case 'price':       return r.price || 0;
+    case 'market_cap':  return r.market_cap || 0;
+    case 'fcf_p':       return bd.fcf_p?.value ?? -999;
+    case 'bm':          return bd.bm?.value ?? -999;
+    case 'ebitda_margin': return bd.ebitda_margin?.value ?? -999;
+    case 'roa':         return bd.roa?.value ?? -999;
+    case 'price_pos':   return bd.price_pos?.value ?? 999; // lower is better
+    default:            return 0;
+  }
+}
+
+function sortTable(col) {
+  if (sortCol === col) {
+    sortDir = sortDir === 'desc' ? 'asc' : 'desc';
+  } else {
+    sortCol = col;
+    sortDir = 'desc';
+  }
+  document.querySelectorAll('.data-table th').forEach(th => {
+    th.classList.remove('sort-asc', 'sort-desc');
+  });
+  event.currentTarget.classList.add(sortDir === 'desc' ? 'sort-desc' : 'sort-asc');
+  renderTable();
+  updateSummaryStats();
+}
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+function fmtColor(v) {
+  if (v === null || v === undefined) return 'num-neu';
+  return v > 0 ? 'num-pos' : v < 0 ? 'num-neg' : 'num-neu';
+}
+
+function fmtCap(v) {
+  if (!v) return '--';
+  if (v >= 1e12) return '$' + (v / 1e12).toFixed(1) + 'T';
+  if (v >= 1e9)  return '$' + (v / 1e9).toFixed(1)  + 'B';
+  return '$' + (v / 1e6).toFixed(0) + 'M';
+}
+
+function fmtPct(v) {
+  if (v === null || v === undefined) return '--';
+  return (v * 100).toFixed(1) + '%';
+}
+
+// ─── Stock Detail Modal ─────────────────────────────────────────────────────
+async function showDetail(ticker) {
+  document.getElementById('modal-ticker').textContent = ticker;
+  document.getElementById('modal-name').textContent = '載入中...';
+  document.getElementById('modal-body').innerHTML = '<div class="p-8 text-center"><div class="spinner mx-auto"></div></div>';
+  document.getElementById('modal').classList.remove('hidden');
+
+  const r = await fetch('/api/stock/' + ticker).then(r => r.json()).catch(() => null);
+  if (!r) {
+    document.getElementById('modal-body').innerHTML = '<div class="text-red p-4">無法載入資料</div>';
+    return;
+  }
+
+  const bd = r.breakdown || {};
+  document.getElementById('modal-name').textContent = r.name || ticker;
+
+  const scoreColor =
+    r.score >= 78 ? '#56d364' : r.score >= 62 ? '#3fb950' :
+    r.score >= 46 ? '#e3b341' : r.score >= 30 ? '#8b949e' : '#f85149';
+
+  const criteria = [
+    { key:'fcf_p',        label:'FCF/P 自由現金流殖利率', fmt: v => v !== null ? (v*100).toFixed(2)+'%' : '--' },
+    { key:'bm',           label:'B/M 帳面市值比',         fmt: v => v !== null ? v.toFixed(3) : '--' },
+    { key:'market_cap',   label:'市值規模',               fmt: v => fmtCap(v) },
+    { key:'ebitda_margin',label:'EBITDA 利潤率',          fmt: v => v !== null ? (v*100).toFixed(1)+'%' : '--' },
+    { key:'roa',          label:'ROA 資產報酬率',         fmt: v => v !== null ? (v*100).toFixed(1)+'%' : '--' },
+    { key:'inv_eff',      label:'投資效率 (Inv Dummy)',   fmt: (v, b) => {
+        if (v === null) return '--';
+        const ag = b.inv_eff?.value;
+        const eg = b.inv_eff?.ebitda_growth;
+        if (ag === null || ag === undefined) return '--';
+        return `資產成長 ${(ag*100).toFixed(1)}% | EBITDA成長 ${eg !== null && eg !== undefined ? (eg*100).toFixed(1)+'%' : '--'}`;
+    }},
+    { key:'price_pos',    label:'52週位置',               fmt: v => v !== null ? v.toFixed(1)+'%' : '--' },
+  ];
+
+  const rows = criteria.map(c => {
+    const item = bd[c.key];
+    const val  = item?.value ?? null;
+    const pts  = item?.pts ?? 0;
+    const max  = item?.max ?? 0;
+    const pct  = max > 0 ? pts / max * 100 : 0;
+    return `
+      <tr>
+        <td class="py-2 pr-4 text-xs text-muted">${c.label}</td>
+        <td class="py-2 pr-4 text-sm text-label font-mono">${c.fmt(val, bd)}</td>
+        <td class="py-2 pr-4">
+          <div class="flex items-center gap-2">
+            <div class="w-20 score-bar-track">
+              <div class="score-bar-fill" style="width:${pct}%"></div>
+            </div>
+            <span class="text-xs text-muted">${pts}/${max}</span>
+          </div>
+        </td>
+      </tr>`;
+  }).join('');
+
+  const flags = (r.red_flags || []).map(f => `<span class="flag">${f}</span>`).join(' ');
+
+  document.getElementById('modal-body').innerHTML = `
+    <div class="flex items-center gap-4 mb-5">
+      <div class="text-center">
+        <div class="text-5xl font-bold" style="color:${scoreColor}">${r.score}</div>
+        <div class="text-xs text-muted">/ 100 分</div>
+      </div>
+      <div>
+        <span class="px-3 py-1 rounded font-bold badge-${r.signal.replace(' ','-')}">${r.signal}</span>
+        <div class="text-xs text-muted mt-1">${r.sector || ''} · ${r.industry || ''}</div>
+        <div class="text-sm text-label mt-1">
+          ${r.price ? '$' + r.price.toFixed(2) : '--'}
+          <span class="text-muted ml-2">${fmtCap(r.market_cap)}</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="mb-4">
+      <div class="text-xs text-muted mb-2">評分明細</div>
+      <table class="w-full text-sm">${rows}</table>
+    </div>
+
+    ${flags ? `
+    <div class="mb-4">
+      <div class="text-xs text-muted mb-2">⚠️ 紅旗警示</div>
+      <div>${flags}</div>
+    </div>` : `<div class="text-green text-sm mb-4">✅ 無紅旗警示</div>`}
+
+    <div class="grid grid-cols-3 gap-3 text-sm">
+      <div class="p-2 rounded border border-dark-border">
+        <div class="text-xs text-muted">P/E</div>
+        <div class="font-semibold">${r.pe ? r.pe.toFixed(1) : '--'}</div>
+      </div>
+      <div class="p-2 rounded border border-dark-border">
+        <div class="text-xs text-muted">P/B</div>
+        <div class="font-semibold">${r.pb ? r.pb.toFixed(2) : '--'}</div>
+      </div>
+      <div class="p-2 rounded border border-dark-border">
+        <div class="text-xs text-muted">P/S</div>
+        <div class="font-semibold">${r.ps ? r.ps.toFixed(2) : '--'}</div>
+      </div>
+      <div class="p-2 rounded border border-dark-border">
+        <div class="text-xs text-muted">ROE</div>
+        <div class="font-semibold ${fmtColor(r.roe)}">${r.roe ? (r.roe*100).toFixed(1)+'%' : '--'}</div>
+      </div>
+      <div class="p-2 rounded border border-dark-border">
+        <div class="text-xs text-muted">Revenue</div>
+        <div class="font-semibold">${fmtCap(r.revenue)}</div>
+      </div>
+      <div class="p-2 rounded border border-dark-border">
+        <div class="text-xs text-muted">FCF</div>
+        <div class="font-semibold ${fmtColor(r.fcf)}">${fmtCap(r.fcf)}</div>
+      </div>
+    </div>`;
+}
+
+function closeModal(e) {
+  if (e.target === document.getElementById('modal')) {
+    document.getElementById('modal').classList.add('hidden');
+  }
+}
+
+// ─── Backtest ─────────────────────────────────────────────────────────────
+async function runBacktest() {
+  const years = parseInt(document.getElementById('bt-years').value) || 1;
+
+  if (allResults.length === 0) {
+    alert('請先執行選股器，取得評分資料後再執行回測');
+    return;
+  }
+
+  document.getElementById('btn-backtest').disabled = true;
+  document.getElementById('btn-backtest').textContent = '⏳ 回測中...';
+  document.getElementById('bt-stats').classList.add('hidden');
+  document.getElementById('bt-chart-card').classList.add('hidden');
+  document.getElementById('bt-table-card').classList.add('hidden');
+
+  try {
+    const r = await fetch('/api/backtest', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ years }),
+    });
+    const d = await r.json();
+
+    if (d.error) {
+      alert(d.error);
+      return;
+    }
+
+    // Stats
+    const portColor  = d.port_return >= 0 ? '#3fb950' : '#f85149';
+    const alphaColor = d.alpha >= 0 ? '#3fb950' : '#f85149';
+    document.getElementById('bt-port-ret').innerHTML =
+      `<span style="color:${portColor}">${d.port_return > 0 ? '+' : ''}${d.port_return}%</span>`;
+    document.getElementById('bt-spy-ret').innerHTML =
+      `<span class="num-neu">${d.spy_return > 0 ? '+' : ''}${d.spy_return}%</span>`;
+    document.getElementById('bt-alpha').innerHTML =
+      `<span style="color:${alphaColor}">${d.alpha > 0 ? '+' : ''}${d.alpha}%</span>`;
+    document.getElementById('bt-winrate').innerHTML =
+      `<span style="color:${d.win_rate >= 50 ? '#3fb950' : '#f85149'}">${d.win_rate}%</span>`;
+    document.getElementById('bt-sharpe').innerHTML =
+      `<span style="color:${d.sharpe >= 1 ? '#3fb950' : d.sharpe >= 0 ? '#e3b341' : '#f85149'}">${d.sharpe}</span>`;
+    document.getElementById('bt-stats').classList.remove('hidden');
+
+    // Chart
+    if (btChart) { btChart.destroy(); btChart = null; }
+    const ctx = document.getElementById('bt-chart').getContext('2d');
+    btChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: d.dates,
+        datasets: [
+          {
+            label: `多倍股組合 (n=${d.n_stocks})`,
+            data: d.port_series,
+            borderColor: '#3fb950',
+            backgroundColor: 'rgba(63,185,80,0.08)',
+            borderWidth: 2,
+            fill: true,
+            tension: 0.3,
+            pointRadius: 0,
+          },
+          {
+            label: 'S&P 500 (SPY)',
+            data: d.spy_series,
+            borderColor: '#388bfd',
+            backgroundColor: 'rgba(56,139,253,0.05)',
+            borderWidth: 2,
+            fill: true,
+            tension: 0.3,
+            pointRadius: 0,
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { labels: { color: '#8b949e', font: { size: 11 } } },
+          tooltip: {
+            mode: 'index',
+            intersect: false,
+            callbacks: {
+              label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y?.toFixed(1)}%`
+            }
+          }
+        },
+        scales: {
+          x: { ticks: { color: '#8b949e', font: { size: 10 } }, grid: { color: '#21262d' } },
+          y: {
+            ticks: { color: '#8b949e', font: { size: 10 },
+                     callback: v => v + '%' },
+            grid: { color: '#21262d' }
+          }
+        }
+      }
+    });
+    document.getElementById('bt-chart-card').classList.remove('hidden');
+
+    // Table
+    const tbody = document.getElementById('bt-body');
+    tbody.innerHTML = '';
+    (d.stock_details || []).forEach(s => {
+      const alpha = s.return - s.spy_return;
+      tbody.innerHTML += `
+        <tr>
+          <td class="font-bold text-label">${s.ticker}</td>
+          <td class="text-right ${s.return >= 0 ? 'num-pos' : 'num-neg'}">${s.return > 0 ? '+' : ''}${s.return}%</td>
+          <td class="text-right num-neu">${s.spy_return > 0 ? '+' : ''}${s.spy_return}%</td>
+          <td class="text-right ${alpha >= 0 ? 'num-pos' : 'num-neg'}">${alpha > 0 ? '+' : ''}${alpha.toFixed(1)}%</td>
+          <td class="text-center">${s.beat ? '✅ 勝' : '❌ 負'}</td>
+          <td class="text-right text-blue">${s.score}</td>
+        </tr>`;
+    });
+    document.getElementById('bt-table-card').classList.remove('hidden');
+
+  } catch(e) {
+    console.error(e);
+    alert('回測失敗：' + e.message);
+  }
+
+  document.getElementById('btn-backtest').disabled = false;
+  document.getElementById('btn-backtest').textContent = '▶ 執行回測';
+}
+
+// ─── Cache ─────────────────────────────────────────────────────────────────
+async function clearCache() {
+  if (!confirm('清除所有快取資料？將需要重新抓取。')) return;
+  const r = await fetch('/api/clear_cache', { method: 'POST' });
+  const d = await r.json();
+  alert(`已清除 ${d.removed} 筆快取`);
+  allResults = [];
+  document.getElementById('results-table').classList.add('hidden');
+  document.getElementById('empty-state').classList.remove('hidden');
+  document.getElementById('empty-state').textContent = '點擊「開始掃描」載入美股多倍股候選';
+  document.getElementById('summary-stats').classList.add('hidden');
+}
+
+// ─── Filter Listeners ────────────────────────────────────────────────────
+document.getElementById('min-score').addEventListener('change', () => { renderTable(); updateSummaryStats(); });
+document.getElementById('sector-filter').addEventListener('change', () => { renderTable(); updateSummaryStats(); });
+document.getElementById('cap-filter').addEventListener('change', () => { renderTable(); updateSummaryStats(); });
+
+// ─── Init ──────────────────────────────────────────────────────────────────
+loadMacro();
+</script>
+
+</body>
+</html>
