@@ -27,66 +27,62 @@ except ImportError:
 app = Flask(__name__)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# DYNAMIC UNIVERSE FETCHING
+# DYNAMIC UNIVERSE FETCHING — 全美股 8000+
 # ─────────────────────────────────────────────────────────────────────────────
 _universe_cache = None
 _universe_cache_time = None
 UNIVERSE_CACHE_HOURS = 24
 
-def fetch_sp500():
-    """Fetch S&P 500 tickers from Wikipedia."""
-    try:
-        tables = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")
-        df = tables[0]
-        return df["Symbol"].str.replace(".", "-", regex=False).tolist()
-    except Exception:
-        return []
-
-def fetch_nasdaq100():
-    """Fetch NASDAQ-100 tickers from Wikipedia."""
-    try:
-        tables = pd.read_html("https://en.wikipedia.org/wiki/Nasdaq-100")
-        for t in tables:
-            if "Ticker" in t.columns:
-                return t["Ticker"].tolist()
-            if "Symbol" in t.columns:
-                return t["Symbol"].tolist()
-        return []
-    except Exception:
-        return []
-
-def fetch_russell2000_sample():
-    """Return a curated Russell 2000 small/mid cap growth sample."""
-    return [
-        "SMCI","AXON","SAIA","AAON","TREX","NOVT","KTOS","HEI","MASI","IRTC",
-        "NVCR","PTCT","RARE","FOLD","KRYS","SWAV","ACAD","HRMY","ITCI","NBIX",
-        "SUPN","INCY","EXAS","NTRA","NEOG","OMCL","PRCT","IART","ALNY","IONS",
-        "MGLN","CRVL","PRFT","NSIT","SLAB","ICFI","FCN","KFRC","RLI","CINF",
-        "CELH","VITL","COKE","FIZZ","LANC","CHEF","SFM","WINA","CVCO","PATK",
-        "HLLY","DORM","DECK","SKX","POOL","AAON","GNRC","AEIS","AIMC","FWRD",
-        "GLOB","EXLS","WEX","PAYO","IIIV","PCTY","PAYC","EPAM","ONTO","ACLS",
-        "SMTC","OSIS","MPWR","MRVL","ZEUS","KALU","CMC","STLD","RS","NUE",
-        "HOLI","PSN","DRS","LDOS","SAIC","CACI","BAH","MANT","ICFI","FCN",
-        "HUBB","XYL","ETN","PH","ROK","GNRC","ITW","EMR","HON","GE",
+def fetch_full_us_market():
+    """
+    Fetch all US-listed stocks from NASDAQ Trader FTP.
+    Returns ~8000+ tickers (NYSE + NASDAQ + AMEX).
+    Source: ftp.nasdaqtrader.com/symboldirectory/
+    """
+    tickers = []
+    urls = [
+        "https://ftp.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt",   # NASDAQ
+        "https://ftp.nasdaqtrader.com/dynamic/SymDir/otherlisted.txt",    # NYSE/AMEX
     ]
+    for url in urls:
+        try:
+            import urllib.request
+            with urllib.request.urlopen(url, timeout=30) as resp:
+                lines = resp.read().decode("utf-8").splitlines()
+            for line in lines[1:]:  # skip header
+                parts = line.split("|")
+                if len(parts) < 2:
+                    continue
+                symbol = parts[0].strip()
+                # 過濾條件：
+                # - 跳過 ETF（第6欄 Y = ETF）
+                # - 只留純字母代號（跳過 warrant/preferred 等特殊符號）
+                # - 跳過 Test Issue
+                if not symbol or not symbol.isalpha():
+                    continue
+                if len(parts) > 6 and parts[6].strip() == "Y":  # ETF
+                    continue
+                if "test" in line.lower():
+                    continue
+                tickers.append(symbol)
+        except Exception:
+            continue
+    return list(dict.fromkeys(tickers))  # deduplicate
 
 def get_universe():
-    """Get combined universe with 24hr cache."""
+    """Get full US market universe with 24hr cache. Falls back to DEFAULT_UNIVERSE."""
     global _universe_cache, _universe_cache_time
     now = datetime.now()
     if (_universe_cache is not None and _universe_cache_time is not None and
             (now - _universe_cache_time).total_seconds() < UNIVERSE_CACHE_HOURS * 3600):
         return _universe_cache
 
-    sp500    = fetch_sp500()
-    ndq100   = fetch_nasdaq100()
-    russell  = fetch_russell2000_sample()
-    combined = list(dict.fromkeys(sp500 + ndq100 + russell))  # deduplicate, preserve order
-    if len(combined) < 100:
-        combined = DEFAULT_UNIVERSE  # fallback
-    _universe_cache = combined
+    tickers = fetch_full_us_market()
+    if len(tickers) < 500:
+        tickers = DEFAULT_UNIVERSE  # fallback if fetch fails
+    _universe_cache = tickers
     _universe_cache_time = now
-    return combined
+    return tickers
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STOCK UNIVERSE
@@ -638,29 +634,44 @@ _daily_results = {
 }
 
 def run_daily_scan():
-    """Run full universe scan and store results. Called by scheduler."""
+    """Run full universe scan with parallel workers. Called by scheduler."""
     global _daily_results
     _daily_results["status"] = "running"
     _daily_results["scan_date"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+    _daily_results["progress"] = {"done": 0, "total": 0}
     try:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
         tickers = get_universe()
+        total = len(tickers)
+        _daily_results["progress"]["total"] = total
         results = []
-        for t in tickers:
-            r = fetch_one(t)
-            if r:
-                results.append(r)
-        results.sort(key=lambda x: x.get("score", 0), reverse=True)
+        errors  = []
+        done    = 0
 
+        # 10 個並行 worker，8000支約 20 分鐘
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            future_to_ticker = {executor.submit(fetch_one, t): t for t in tickers}
+            for future in as_completed(future_to_ticker):
+                done += 1
+                _daily_results["progress"]["done"] = done
+                r = future.result()
+                if r:
+                    results.append(r)
+                else:
+                    errors.append(future_to_ticker[future])
+
+        results.sort(key=lambda x: x.get("score", 0), reverse=True)
         strong_buy = [r for r in results if r.get("score", 0) >= 78]
         buy        = [r for r in results if 62 <= r.get("score", 0) < 78]
 
         _daily_results.update({
-            "status":          "done",
-            "scan_date":       datetime.now().strftime("%Y-%m-%d %H:%M"),
-            "top_strong_buy":  strong_buy[:20],
-            "top_buy":         buy[:20],
+            "status":         "done",
+            "scan_date":      datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "top_strong_buy": strong_buy[:30],
+            "top_buy":        buy[:30],
             "summary": {
                 "total_scanned": len(results),
+                "total_errors":  len(errors),
                 "strong_buy":    len(strong_buy),
                 "buy":           len(buy),
                 "avg_score":     round(sum(r.get("score",0) for r in results)/max(len(results),1), 1),
@@ -691,6 +702,18 @@ _scheduler_thread.start()
 def api_daily_results():
     """Return latest daily scan results."""
     return jsonify(_daily_results)
+
+@app.route("/api/scan-progress")
+def api_scan_progress():
+    """Return current scan progress (for polling)."""
+    p = _daily_results.get("progress", {})
+    return jsonify({
+        "status":  _daily_results.get("status", "idle"),
+        "done":    p.get("done", 0),
+        "total":   p.get("total", 0),
+        "pct":     round(p.get("done",0) / max(p.get("total",1),1) * 100, 1),
+        "scan_date": _daily_results.get("scan_date"),
+    })
 
 @app.route("/api/trigger-scan", methods=["POST"])
 def api_trigger_scan():
