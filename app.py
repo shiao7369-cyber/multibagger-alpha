@@ -626,6 +626,81 @@ def api_clear_cache():
             removed += 1
     return jsonify({"removed": removed})
 
+# ─────────────────────────────────────────────────────────────────────────────
+# DAILY SCAN SCHEDULER
+# ─────────────────────────────────────────────────────────────────────────────
+_daily_results = {
+    "scan_date": None,
+    "status": "idle",          # idle | running | done | error
+    "top_strong_buy": [],
+    "top_buy": [],
+    "summary": {},
+}
+
+def run_daily_scan():
+    """Run full universe scan and store results. Called by scheduler."""
+    global _daily_results
+    _daily_results["status"] = "running"
+    _daily_results["scan_date"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+    try:
+        tickers = get_universe()
+        results = []
+        for t in tickers:
+            r = fetch_one(t)
+            if r:
+                results.append(r)
+        results.sort(key=lambda x: x.get("score", 0), reverse=True)
+
+        strong_buy = [r for r in results if r.get("score", 0) >= 78]
+        buy        = [r for r in results if 62 <= r.get("score", 0) < 78]
+
+        _daily_results.update({
+            "status":          "done",
+            "scan_date":       datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "top_strong_buy":  strong_buy[:20],
+            "top_buy":         buy[:20],
+            "summary": {
+                "total_scanned": len(results),
+                "strong_buy":    len(strong_buy),
+                "buy":           len(buy),
+                "avg_score":     round(sum(r.get("score",0) for r in results)/max(len(results),1), 1),
+            }
+        })
+    except Exception as e:
+        _daily_results["status"] = "error"
+        _daily_results["error"]  = str(e)
+
+def scheduler_loop():
+    """Background thread: run scan every day at 00:00 Taiwan time (UTC+8 = UTC+0 16:00)."""
+    import time as time_mod
+    while True:
+        now = datetime.utcnow()
+        # Target: 16:00 UTC = 00:00 UTC+8
+        target = now.replace(hour=16, minute=0, second=0, microsecond=0)
+        if now >= target:
+            target = target + timedelta(days=1)
+        sleep_secs = (target - now).total_seconds()
+        time_mod.sleep(sleep_secs)
+        run_daily_scan()
+
+# Start scheduler in background
+_scheduler_thread = threading.Thread(target=scheduler_loop, daemon=True)
+_scheduler_thread.start()
+
+@app.route("/api/daily-results")
+def api_daily_results():
+    """Return latest daily scan results."""
+    return jsonify(_daily_results)
+
+@app.route("/api/trigger-scan", methods=["POST"])
+def api_trigger_scan():
+    """Manually trigger a scan (for testing or Mac Mini cron)."""
+    if _daily_results.get("status") == "running":
+        return jsonify({"status": "already_running"})
+    t = threading.Thread(target=run_daily_scan, daemon=True)
+    t.start()
+    return jsonify({"status": "started", "message": "掃描已啟動，約 15 分鐘完成"})
+
 
 if __name__ == "__main__":
     print("=" * 60)
